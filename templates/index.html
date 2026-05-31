@@ -1,0 +1,638 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Trip Agentic AI</title>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    background: #0f1117;
+    color: #e2e8f0;
+    min-height: 100vh;
+  }
+
+  header {
+    background: linear-gradient(135deg, #1a1f2e 0%, #16213e 100%);
+    border-bottom: 1px solid #2d3748;
+    padding: 1.25rem 2rem;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+  }
+  header h1 { font-size: 1.4rem; font-weight: 700; color: #63b3ed; }
+  header span { font-size: 1.6rem; }
+
+  /* Stepper */
+  .stepper {
+    display: flex;
+    justify-content: center;
+    gap: 0;
+    padding: 2rem 1rem 1rem;
+  }
+  .step {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    color: #4a5568;
+    font-size: 0.85rem;
+    font-weight: 600;
+  }
+  .step.active { color: #63b3ed; }
+  .step.done   { color: #48bb78; }
+  .step-num {
+    width: 28px; height: 28px;
+    border-radius: 50%;
+    border: 2px solid currentColor;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 0.8rem; font-weight: 700;
+    flex-shrink: 0;
+  }
+  .step.done .step-num { background: #48bb78; border-color: #48bb78; color: #fff; }
+  .step.active .step-num { background: #63b3ed; border-color: #63b3ed; color: #fff; }
+  .step-line {
+    width: 60px; height: 2px;
+    background: #2d3748;
+    margin: 0 0.5rem;
+    flex-shrink: 0;
+  }
+  .step-line.done { background: #48bb78; }
+
+  /* Panels */
+  .panel {
+    display: none;
+    max-width: 760px;
+    margin: 0 auto;
+    padding: 1.5rem 1rem 3rem;
+  }
+  .panel.active { display: block; }
+
+  .card-box {
+    background: #1a1f2e;
+    border: 1px solid #2d3748;
+    border-radius: 12px;
+    padding: 1.5rem;
+    margin-bottom: 1.5rem;
+  }
+  .card-box h2 { font-size: 1.1rem; color: #90cdf4; margin-bottom: 1rem; }
+
+  /* Card list */
+  #card-list { display: flex; flex-direction: column; gap: 0.75rem; margin-bottom: 1.25rem; }
+  .card-item {
+    background: #0f1117;
+    border: 1px solid #2d3748;
+    border-radius: 8px;
+    padding: 0.75rem 1rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .card-item-info { display: flex; flex-direction: column; gap: 0.2rem; }
+  .card-item-name { font-weight: 600; color: #e2e8f0; }
+  .card-item-meta { font-size: 0.78rem; color: #718096; }
+  .card-item-last4 {
+    font-family: monospace;
+    font-size: 0.9rem;
+    color: #63b3ed;
+    background: #1a1f2e;
+    padding: 0.2rem 0.5rem;
+    border-radius: 4px;
+    border: 1px solid #2d3748;
+  }
+  .btn-remove {
+    background: none; border: none; color: #fc8181;
+    cursor: pointer; font-size: 1.1rem; padding: 0.2rem 0.4rem;
+    border-radius: 4px;
+    transition: background 0.15s;
+  }
+  .btn-remove:hover { background: #2d1515; }
+
+  /* Add card form */
+  .add-card-form {
+    background: #0f1117;
+    border: 1px dashed #2d3748;
+    border-radius: 8px;
+    padding: 1rem;
+  }
+  .add-card-form h3 { font-size: 0.9rem; color: #a0aec0; margin-bottom: 0.75rem; }
+  .form-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.6rem;
+  }
+  .form-grid .full { grid-column: 1 / -1; }
+
+  label { font-size: 0.78rem; color: #a0aec0; display: block; margin-bottom: 0.25rem; }
+  input, select {
+    width: 100%;
+    background: #1a1f2e;
+    border: 1px solid #2d3748;
+    border-radius: 6px;
+    color: #e2e8f0;
+    padding: 0.5rem 0.75rem;
+    font-size: 0.88rem;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+  input:focus, select:focus { border-color: #63b3ed; }
+  select option { background: #1a1f2e; }
+
+  /* Buttons */
+  .btn {
+    padding: 0.6rem 1.4rem;
+    border-radius: 8px;
+    border: none;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: opacity 0.15s, transform 0.1s;
+  }
+  .btn:hover { opacity: 0.88; transform: translateY(-1px); }
+  .btn:active { transform: translateY(0); }
+  .btn-primary { background: #3182ce; color: #fff; }
+  .btn-success { background: #38a169; color: #fff; }
+  .btn-outline {
+    background: transparent;
+    border: 1px solid #4a5568;
+    color: #a0aec0;
+  }
+  .btn-outline:hover { border-color: #63b3ed; color: #63b3ed; }
+
+  .btn-row {
+    display: flex;
+    gap: 0.75rem;
+    margin-top: 1rem;
+    flex-wrap: wrap;
+  }
+
+  /* Trip form */
+  .trip-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.75rem;
+  }
+  .trip-grid .full { grid-column: 1 / -1; }
+
+  /* Results */
+  #results-panel .card-box { padding: 0; overflow: hidden; }
+  .results-header {
+    padding: 1rem 1.5rem;
+    background: #16213e;
+    border-bottom: 1px solid #2d3748;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .results-header h2 { color: #90cdf4; font-size: 1rem; }
+  #report-body {
+    padding: 1.5rem;
+    line-height: 1.7;
+    font-size: 0.9rem;
+  }
+  #report-body h1 { font-size: 1.3rem; color: #63b3ed; margin: 1rem 0 0.5rem; }
+  #report-body h2 { font-size: 1.05rem; color: #90cdf4; margin: 1.25rem 0 0.5rem; border-bottom: 1px solid #2d3748; padding-bottom: 0.3rem; }
+  #report-body h3 { font-size: 0.95rem; color: #a0aec0; margin: 1rem 0 0.4rem; }
+  #report-body p  { margin-bottom: 0.6rem; color: #cbd5e0; }
+  #report-body ul, #report-body ol { padding-left: 1.4rem; margin-bottom: 0.6rem; }
+  #report-body li { margin-bottom: 0.3rem; color: #cbd5e0; }
+  #report-body strong { color: #e2e8f0; }
+  #report-body em { color: #a0aec0; }
+  #report-body blockquote {
+    border-left: 3px solid #63b3ed;
+    padding: 0.5rem 1rem;
+    background: #1a1f2e;
+    border-radius: 0 6px 6px 0;
+    margin: 0.75rem 0;
+    color: #90cdf4;
+  }
+  #report-body table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 0.75rem 0;
+    font-size: 0.82rem;
+  }
+  #report-body th {
+    background: #1a1f2e;
+    color: #90cdf4;
+    padding: 0.5rem 0.75rem;
+    text-align: left;
+    border: 1px solid #2d3748;
+  }
+  #report-body td {
+    padding: 0.45rem 0.75rem;
+    border: 1px solid #2d3748;
+    color: #cbd5e0;
+  }
+  #report-body tr:nth-child(even) td { background: #1a1f2e; }
+  #report-body code {
+    background: #1a1f2e;
+    padding: 0.1rem 0.35rem;
+    border-radius: 3px;
+    font-size: 0.82rem;
+    color: #f6ad55;
+  }
+
+  /* Loader */
+  .loader-wrap {
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    gap: 1rem;
+    padding: 3rem;
+    color: #a0aec0;
+  }
+  .loader-wrap.show { display: flex; }
+  .spinner {
+    width: 40px; height: 40px;
+    border: 3px solid #2d3748;
+    border-top-color: #63b3ed;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .error-msg {
+    background: #2d1515;
+    border: 1px solid #fc8181;
+    border-radius: 8px;
+    padding: 0.75rem 1rem;
+    color: #fc8181;
+    font-size: 0.88rem;
+    margin-top: 0.75rem;
+    display: none;
+  }
+  .error-msg.show { display: block; }
+
+  .empty-state {
+    text-align: center;
+    color: #4a5568;
+    padding: 1.5rem;
+    font-size: 0.88rem;
+  }
+
+  /* Trip type toggle buttons */
+  .trip-type-btn {
+    padding: 0.45rem 1.1rem;
+    border-radius: 6px;
+    border: 1px solid #4a5568;
+    background: transparent;
+    color: #a0aec0;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .trip-type-btn.active {
+    background: #2b4c7e;
+    border-color: #63b3ed;
+    color: #63b3ed;
+  }
+  .trip-type-btn:hover:not(.active) { border-color: #718096; color: #e2e8f0; }
+</style>
+</head>
+<body>
+
+<header>
+  <span>✈️</span>
+  <h1>Trip Agentic AI</h1>
+</header>
+
+<!-- Stepper -->
+<div class="stepper">
+  <div class="step active" id="step1-indicator">
+    <div class="step-num">1</div>
+    <span>Your Cards</span>
+  </div>
+  <div class="step-line" id="line1"></div>
+  <div class="step" id="step2-indicator">
+    <div class="step-num">2</div>
+    <span>Trip Details</span>
+  </div>
+  <div class="step-line" id="line2"></div>
+  <div class="step" id="step3-indicator">
+    <div class="step-num">3</div>
+    <span>Results</span>
+  </div>
+</div>
+
+<!-- ── STEP 1: Cards ── -->
+<div class="panel active" id="step1-panel">
+  <div class="card-box">
+    <h2>💳 Add Your Cards</h2>
+    <div id="card-list">
+      <div class="empty-state">No cards added yet. Add at least one card below.</div>
+    </div>
+
+    <div class="add-card-form">
+      <h3>+ New Card</h3>
+      <div class="form-grid">
+        <div class="full">
+          <label>Card Name</label>
+          <input id="c-name" placeholder="e.g. HDFC Regalia, Chase Sapphire Preferred">
+        </div>
+        <div>
+          <label>Bank</label>
+          <input id="c-bank" placeholder="e.g. HDFC, Chase, Amex">
+        </div>
+        <div>
+          <label>Network</label>
+          <select id="c-network">
+            <option value="visa">Visa</option>
+            <option value="mastercard">Mastercard</option>
+            <option value="amex">Amex</option>
+            <option value="rupay">RuPay</option>
+            <option value="diners">Diners</option>
+          </select>
+        </div>
+        <div>
+          <label>Type</label>
+          <select id="c-type">
+            <option value="credit">Credit</option>
+            <option value="debit">Debit</option>
+          </select>
+        </div>
+        <div>
+          <label>Last 4 Digits</label>
+          <input id="c-last4" placeholder="1234" maxlength="4" pattern="\d{4}">
+        </div>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-outline" onclick="addCard()">+ Add Card</button>
+      </div>
+    </div>
+
+    <div class="error-msg" id="cards-error"></div>
+
+    <div class="btn-row" style="margin-top:1.25rem">
+      <button class="btn btn-primary" onclick="proceedToTrip()">Continue to Trip Details →</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── STEP 2: Trip Details ── -->
+<div class="panel" id="step2-panel">
+  <div class="card-box">
+    <h2>🗺️ Trip Details</h2>
+
+    <!-- Trip type toggle -->
+    <div style="margin-bottom:1.25rem">
+      <label style="margin-bottom:0.5rem;display:block">Trip Type</label>
+      <div style="display:flex;gap:0.5rem">
+        <button id="btn-oneway" class="trip-type-btn active" onclick="setTripType('one-way')">✈️ One-Way</button>
+        <button id="btn-roundtrip" class="trip-type-btn" onclick="setTripType('round-trip')">🔄 Round-Trip</button>
+      </div>
+    </div>
+
+    <!-- Flight section -->
+    <div style="background:#0f1117;border:1px solid #2d3748;border-radius:8px;padding:1rem;margin-bottom:1rem">
+      <div style="font-size:0.78rem;color:#63b3ed;font-weight:700;margin-bottom:0.75rem;text-transform:uppercase;letter-spacing:0.05em">✈️ Flight</div>
+      <div class="trip-grid">
+        <div>
+          <label>Origin Airport (IATA)</label>
+          <input id="t-origin" placeholder="e.g. DEL, JFK, BOM" style="text-transform:uppercase">
+        </div>
+        <div>
+          <label>Destination Airport (IATA)</label>
+          <input id="t-dest" placeholder="e.g. DXB, SIN, LHR" style="text-transform:uppercase">
+        </div>
+        <div>
+          <label>Departure Date</label>
+          <input id="t-checkin" type="date">
+        </div>
+        <div id="return-date-wrap">
+          <label>Return Date</label>
+          <input id="t-return" type="date" disabled style="opacity:0.4;cursor:not-allowed">
+        </div>
+        <div>
+          <label>Adults</label>
+          <input id="t-adults" type="number" value="1" min="1" max="9">
+        </div>
+        <div>
+          <label>Currency</label>
+          <select id="t-currency">
+            <option value="USD">USD</option>
+            <option value="INR">INR</option>
+            <option value="EUR">EUR</option>
+            <option value="GBP">GBP</option>
+            <option value="AED">AED</option>
+            <option value="SGD">SGD</option>
+            <option value="AUD">AUD</option>
+            <option value="CAD">CAD</option>
+            <option value="JPY">JPY</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <!-- Hotel section -->
+    <div style="background:#0f1117;border:1px solid #2d3748;border-radius:8px;padding:1rem;margin-bottom:1rem">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.75rem">
+        <div style="font-size:0.78rem;color:#f6ad55;font-weight:700;text-transform:uppercase;letter-spacing:0.05em">🏨 Hotel Dates</div>
+        <label style="display:flex;align-items:center;gap:0.4rem;font-size:0.78rem;color:#a0aec0;cursor:pointer;margin:0">
+          <input type="checkbox" id="hotel-same" checked onchange="toggleHotelDates()" style="width:auto">
+          Same as flight dates
+        </label>
+      </div>
+      <div class="trip-grid" id="hotel-dates-wrap" style="opacity:0.4;pointer-events:none">
+        <div>
+          <label>Hotel Check-in</label>
+          <input id="t-hotel-in" type="date" disabled>
+        </div>
+        <div>
+          <label>Hotel Check-out</label>
+          <input id="t-hotel-out" type="date" disabled>
+        </div>
+      </div>
+      <div id="hotel-dates-info" style="font-size:0.78rem;color:#718096;margin-top:0.4rem">
+        Hotel dates will match flight departure date and return/checkout date.
+      </div>
+    </div>
+
+    <div class="error-msg" id="trip-error"></div>
+
+    <div class="btn-row" style="margin-top:1.25rem">
+      <button class="btn btn-outline" onclick="goTo(1)">← Back</button>
+      <button class="btn btn-success" onclick="runPipeline()">🚀 Find Best Cards</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── STEP 3: Results ── -->
+<div class="panel" id="step3-panel">
+  <div class="loader-wrap" id="loader">
+    <div class="spinner"></div>
+    <span>Fetching live flights, hotels & card benefits…</span>
+  </div>
+
+  <div class="card-box" id="results-box" style="display:none">
+    <div class="results-header">
+      <h2>📊 Trip Report</h2>
+      <button class="btn btn-outline" onclick="goTo(2)" style="font-size:0.8rem;padding:0.4rem 0.9rem">← Edit Trip</button>
+    </div>
+    <div id="report-body"></div>
+  </div>
+
+  <div class="error-msg" id="run-error"></div>
+</div>
+
+<script>
+  let cards = [];
+  let tripType = 'one-way';
+
+  // ── Trip type ─────────────────────────────────────────────────────────────
+  function setTripType(type) {
+    tripType = type;
+    document.getElementById('btn-oneway').classList.toggle('active', type === 'one-way');
+    document.getElementById('btn-roundtrip').classList.toggle('active', type === 'round-trip');
+    const ret = document.getElementById('t-return');
+    ret.disabled = (type === 'one-way');
+    ret.style.opacity = (type === 'one-way') ? '0.4' : '1';
+    ret.style.cursor  = (type === 'one-way') ? 'not-allowed' : 'auto';
+  }
+
+  // ── Hotel dates toggle ────────────────────────────────────────────────────
+  function toggleHotelDates() {
+    const same = document.getElementById('hotel-same').checked;
+    const wrap = document.getElementById('hotel-dates-wrap');
+    const info = document.getElementById('hotel-dates-info');
+    const hi   = document.getElementById('t-hotel-in');
+    const ho   = document.getElementById('t-hotel-out');
+    wrap.style.opacity       = same ? '0.4' : '1';
+    wrap.style.pointerEvents = same ? 'none' : 'auto';
+    hi.disabled = same;
+    ho.disabled = same;
+    info.style.display = same ? 'block' : 'none';
+  }
+
+  // ── Stepper ───────────────────────────────────────────────────────────────
+  function goTo(step) {
+    [1,2,3].forEach(i => {
+      document.getElementById(`step${i}-panel`).classList.toggle('active', i === step);
+      const ind = document.getElementById(`step${i}-indicator`);
+      ind.classList.remove('active','done');
+      if (i < step) ind.classList.add('done');
+      else if (i === step) ind.classList.add('active');
+    });
+    document.getElementById('line1').classList.toggle('done', step > 1);
+    document.getElementById('line2').classList.toggle('done', step > 2);
+  }
+
+  // ── Cards ─────────────────────────────────────────────────────────────────
+  function renderCards() {
+    const list = document.getElementById('card-list');
+    if (!cards.length) {
+      list.innerHTML = '<div class="empty-state">No cards added yet. Add at least one card below.</div>';
+      return;
+    }
+    list.innerHTML = cards.map((c, i) => `
+      <div class="card-item">
+        <div class="card-item-info">
+          <span class="card-item-name">${c.name}</span>
+          <span class="card-item-meta">${c.bank} · ${c.network.toUpperCase()} · ${c.card_type}</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:0.75rem">
+          <span class="card-item-last4">•••• ${c.number_last4}</span>
+          <button class="btn-remove" onclick="removeCard(${i})" title="Remove">&#x2715;</button>
+        </div>
+      </div>
+    `).join('');
+  }
+
+  function addCard() {
+    const name    = document.getElementById('c-name').value.trim();
+    const bank    = document.getElementById('c-bank').value.trim();
+    const network = document.getElementById('c-network').value;
+    const type    = document.getElementById('c-type').value;
+    const last4   = document.getElementById('c-last4').value.trim();
+    const err     = document.getElementById('cards-error');
+    if (!name || !bank || !last4) { showError(err, 'Please fill in Card Name, Bank, and Last 4 Digits.'); return; }
+    if (!/^\d{4}$/.test(last4))   { showError(err, 'Last 4 digits must be exactly 4 numbers.'); return; }
+    err.classList.remove('show');
+    cards.push({ name, bank, network, card_type: type, number_last4: last4 });
+    renderCards();
+    ['c-name','c-bank','c-last4'].forEach(id => document.getElementById(id).value = '');
+  }
+
+  function removeCard(i) { cards.splice(i, 1); renderCards(); }
+
+  async function proceedToTrip() {
+    const err = document.getElementById('cards-error');
+    if (!cards.length) { showError(err, 'Add at least one card before continuing.'); return; }
+    const res = await fetch('/api/cards', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cards })
+    });
+    if (!res.ok) { showError(err, 'Failed to save cards. Please try again.'); return; }
+    err.classList.remove('show');
+    goTo(2);
+  }
+
+  // ── Run pipeline ──────────────────────────────────────────────────────────
+  async function runPipeline() {
+    const origin    = document.getElementById('t-origin').value.trim().toUpperCase();
+    const dest      = document.getElementById('t-dest').value.trim().toUpperCase();
+    const checkin   = document.getElementById('t-checkin').value;
+    const retDate   = document.getElementById('t-return').value;
+    const adults    = document.getElementById('t-adults').value;
+    const currency  = document.getElementById('t-currency').value;
+    const hotelSame = document.getElementById('hotel-same').checked;
+    const hotelIn   = hotelSame ? '' : document.getElementById('t-hotel-in').value;
+    const hotelOut  = hotelSame ? '' : document.getElementById('t-hotel-out').value;
+    const err       = document.getElementById('trip-error');
+
+    if (!origin || !dest || !checkin) { showError(err, 'Please fill in origin, destination, and departure date.'); return; }
+    if (origin === dest)              { showError(err, 'Origin and destination cannot be the same airport.'); return; }
+    if (origin.length !== 3 || dest.length !== 3) { showError(err, 'Airport codes must be exactly 3 letters (e.g. BLR, JFK, DXB).'); return; }
+    if (tripType === 'round-trip' && !retDate)     { showError(err, 'Please select a return date for round-trip.'); return; }
+    if (tripType === 'round-trip' && retDate <= checkin) { showError(err, 'Return date must be after departure date.'); return; }
+    if (!hotelSame && (!hotelIn || !hotelOut))     { showError(err, 'Please fill in both hotel check-in and check-out dates.'); return; }
+    if (!hotelSame && hotelOut <= hotelIn)         { showError(err, 'Hotel check-out must be after check-in.'); return; }
+    err.classList.remove('show');
+
+    goTo(3);
+    document.getElementById('loader').classList.add('show');
+    document.getElementById('results-box').style.display = 'none';
+    document.getElementById('run-error').classList.remove('show');
+
+    try {
+      const res = await fetch('/api/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          origin, destination: dest,
+          check_in:  checkin,
+          check_out: tripType === 'round-trip' ? retDate : checkin,
+          trip_type: tripType,
+          return_date:     tripType === 'round-trip' ? retDate : '',
+          hotel_check_in:  hotelIn,
+          hotel_check_out: hotelOut,
+          adults, currency
+        })
+      });
+      const data = await res.json();
+      document.getElementById('loader').classList.remove('show');
+      if (!res.ok || data.error) { showError(document.getElementById('run-error'), data.error || 'Pipeline failed.'); return; }
+      document.getElementById('report-body').innerHTML = marked.parse(data.report);
+      document.getElementById('results-box').style.display = 'block';
+    } catch (e) {
+      document.getElementById('loader').classList.remove('show');
+      showError(document.getElementById('run-error'), 'Network error: ' + e.message);
+    }
+  }
+
+  // ── Helpers ───────────────────────────────────────────────────────────────
+  function showError(el, msg) { el.textContent = msg; el.classList.add('show'); }
+
+  (function() {
+    const today = new Date();
+    const next  = new Date(today); next.setDate(today.getDate() + 7);
+    const fmt = d => d.toISOString().split('T')[0];
+    document.getElementById('t-checkin').value = fmt(today);
+    document.getElementById('t-return').value  = fmt(next);
+  })();
+</script>
+</body>
+</html>
