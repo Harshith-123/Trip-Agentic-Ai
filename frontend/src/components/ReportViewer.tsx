@@ -30,6 +30,137 @@ interface Props {
 
 type Tab = 'report' | 'cards' | 'flights';
 
+// ── Flight types & helpers ────────────────────────────────────────────────────
+
+interface FlightRow {
+  provider: string;
+  airlines?: string;
+  price: number;
+  currency: string;
+  departure?: string;
+  arrival?: string;
+  duration?: string;
+  stops?: number;
+  source?: string;
+  url?: string;
+}
+
+function flightAirlines(f: FlightRow) {
+  return String(f.airlines || f.provider || '').replace(/^Duffel \(/, '').replace(/\)$/, '').replace(/ Return$/, '').replace(/Google Flights.*/, 'Google Flights');
+}
+
+function flightMeta(f: FlightRow) {
+  const dep = String(f.departure || '').slice(0, 16).replace('T', ' ');
+  const dur = f.duration || '-';
+  const stops = `${f.stops ?? 0} stop${f.stops !== 1 ? 's' : ''}`;
+  return `${dep} · ${dur} · ${stops}`;
+}
+
+function FlightLeg({ f, label }: { f: FlightRow; label: string }) {
+  return (
+    <div className="flex items-center gap-3">
+      <div className={`flex-shrink-0 w-7 h-7 rounded-lg flex items-center justify-center text-[10px] font-extrabold tracking-widest
+        ${label === 'OUT' ? 'bg-brand/10 text-brand' : 'bg-emerald-50 text-emerald-700'}`}>
+        {label}
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-bold text-gray-800 truncate">{flightAirlines(f)}</p>
+        <p className="text-xs text-gray-400">{flightMeta(f)}</p>
+      </div>
+      <div className="text-right flex-shrink-0">
+        <p className="text-sm font-bold text-gray-700">{f.currency} {Number(f.price).toFixed(0)}</p>
+        {f.url && (
+          <a href={String(f.url)} target="_blank" rel="noopener noreferrer"
+            className="text-[11px] text-brand hover:underline font-semibold">Book ↗</a>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function FlightsTab({ flights }: { flights: FlightRow[] }) {
+  if (flights.length === 0) {
+    return (
+      <div className="card-white p-10 text-center">
+        <p className="text-sm text-gray-400">No flight data available.</p>
+      </div>
+    );
+  }
+
+  const outbound = flights.filter(f => !String(f.provider).includes('Return'));
+  const returns  = flights.filter(f =>  String(f.provider).includes('Return'));
+  const isRT     = returns.length > 0;
+
+  if (!isRT) {
+    return (
+      <div className="space-y-2">
+        {outbound.slice(0, 15).map((f, i) => (
+          <div key={i} className="card-white px-5 py-4 flex flex-col sm:flex-row sm:items-center gap-4 hover:shadow-card-hover transition-shadow">
+            <div className="w-10 h-10 bg-gray-50 border border-gray-100 rounded-xl flex items-center justify-center flex-shrink-0">
+              <Plane size={18} className="text-brand" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 mb-0.5">
+                <p className="text-sm font-bold text-gray-800 truncate">{flightAirlines(f)}</p>
+                {f.source === 'duffel' && <span className="badge-brand flex-shrink-0">live</span>}
+              </div>
+              <p className="text-xs text-gray-400">{flightMeta(f)}</p>
+            </div>
+            <div className="text-left sm:text-right flex-shrink-0">
+              <p className="text-xl font-extrabold text-green-600">{f.currency} {Number(f.price).toFixed(0)}</p>
+              {f.url && <a href={String(f.url)} target="_blank" rel="noopener noreferrer" className="text-xs text-brand hover:underline font-semibold">Book ↗</a>}
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  // Round-trip: pair each outbound with best matching return
+  const sortedOut = [...outbound].sort((a, b) => Number(a.price) - Number(b.price));
+  const sortedRet = [...returns].sort((a, b) => Number(a.price) - Number(b.price));
+
+  const packages = sortedOut.slice(0, 12).map(ob => {
+    const sameAirline = sortedRet.find(r => flightAirlines(r) === flightAirlines(ob));
+    const ret = sameAirline || sortedRet[0];
+    return { outbound: ob, ret, total: Number(ob.price) + Number(ret?.price ?? 0) };
+  }).sort((a, b) => a.total - b.total);
+
+  const best = packages[0];
+
+  return (
+    <div className="space-y-3">
+      {best && (
+        <div className="rounded-2xl bg-gradient-to-r from-green-500 to-emerald-600 px-5 py-4 flex items-center justify-between shadow-lg shadow-emerald-900/10">
+          <div>
+            <p className="text-green-100 text-[11px] font-bold uppercase tracking-widest mb-0.5">Best Round-Trip Deal</p>
+            <p className="text-white font-bold text-sm">{flightAirlines(best.outbound)}</p>
+          </div>
+          <div className="text-right">
+            <p className="text-white text-2xl font-extrabold">{best.outbound.currency} {best.total.toFixed(0)}</p>
+            <p className="text-green-100 text-[11px]">total both ways</p>
+          </div>
+        </div>
+      )}
+      {packages.map((pkg, i) => (
+        <div key={i} className={`card-white p-4 space-y-2.5 hover:shadow-card-hover transition-shadow ${i === 0 ? 'ring-2 ring-brand/20' : ''}`}>
+          <FlightLeg f={pkg.outbound} label="OUT" />
+          <div className="border-t border-dashed border-gray-100" />
+          <FlightLeg f={pkg.ret} label="RET" />
+          <div className="flex items-center justify-between pt-1 border-t border-gray-100">
+            <span className="text-xs text-gray-400 font-medium">Round-trip total</span>
+            <span className="text-lg font-extrabold text-green-600">
+              {pkg.outbound.currency} {pkg.total.toFixed(0)}
+            </span>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 export default function ReportViewer({ result, onReset }: Props) {
   const [tab, setTab] = useState<Tab>('report');
   const recs          = result.recommendations as Rec[];
@@ -142,39 +273,7 @@ export default function ReportViewer({ result, onReset }: Props) {
       )}
 
       {/* ── Flights ── */}
-      {tab === 'flights' && (
-        <div className="space-y-2">
-          {result.flights.length === 0 ? (
-            <div className="card-white p-10 text-center">
-              <p className="text-sm text-gray-400">No flight data available.</p>
-            </div>
-          ) : (result.flights as Array<Record<string, string | number>>).slice(0, 15).map((f, i) => (
-            <div key={i} className="card-white px-5 py-4 flex flex-col sm:flex-row sm:items-center gap-4 hover:shadow-card-hover transition-shadow">
-              <div className="w-10 h-10 bg-gray-50 border border-gray-100 rounded-xl flex items-center justify-center flex-shrink-0 overflow-hidden">
-                <Plane size={18} className="text-brand" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 mb-0.5">
-                  <p className="text-sm font-bold text-gray-800 truncate">
-                    {String(f.provider || '').replace(/^Duffel \(/, '').replace(/\)$/, '')}
-                  </p>
-                  {f.source === 'duffel' && <span className="badge-brand flex-shrink-0">live</span>}
-                </div>
-                <p className="text-xs text-gray-400">
-                  {String(f.departure || '-').slice(0, 16)} · {f.duration || '-'} · {f.stops ?? '0'} stop{f.stops !== 1 ? 's' : ''}
-                </p>
-              </div>
-              <div className="text-left sm:text-right flex-shrink-0 w-full sm:w-auto">
-                <p className="text-xl font-extrabold text-green-600">{f.currency} {Number(f.price).toFixed(0)}</p>
-                {f.url ? (
-                  <a href={String(f.url)} target="_blank" rel="noopener noreferrer"
-                    className="text-xs text-brand hover:underline font-semibold">Book ↗</a>
-                ) : <p className="text-xs text-gray-300">-</p>}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
+      {tab === 'flights' && <FlightsTab flights={result.flights as FlightRow[]} />}
 
       <button onClick={onReset}
         className="w-full border-2 border-gray-200 hover:border-brand text-gray-400 hover:text-brand text-sm font-semibold py-3 rounded-xl transition-all">
@@ -192,3 +291,4 @@ function BenefitPill({ label, value, positive }: { label: string; value: string;
     </div>
   );
 }
+

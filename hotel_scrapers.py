@@ -24,6 +24,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 from typing import Any
 
+import httpx
 import primp
 
 # ─── Preload system deps for Playwright Chromium ──────────────────────────
@@ -478,6 +479,15 @@ def _expedia_parse_html(html: str, city: str, check_in: str, check_out: str,
     return out
 
 
+def _expedia_date(d: str) -> str:
+    """Convert YYYY-MM-DD to MM/DD/YYYY as required by Expedia/Hotels.com URLs."""
+    try:
+        from datetime import datetime
+        return datetime.strptime(d, "%Y-%m-%d").strftime("%m/%d/%Y")
+    except Exception:
+        return d
+
+
 def scrape_expedia(
     city: str, check_in: str, check_out: str, adults: int, currency: str
 ) -> list[dict]:
@@ -485,7 +495,7 @@ def scrape_expedia(
     try:
         search_url = (
             "https://www.expedia.com/Hotel-Search"
-            f"?destination={city}&startDate={check_in}&endDate={check_out}"
+            f"?destination={city}&startDate={_expedia_date(check_in)}&endDate={_expedia_date(check_out)}"
             f"&rooms=1&adults={adults}&currency={currency}&sort=PRICE_LOW_TO_HIGH"
         )
 
@@ -527,7 +537,7 @@ def scrape_hotels_com(
     try:
         search_url = (
             "https://www.hotels.com/Hotel-Search"
-            f"?destination={city}&startDate={check_in}&endDate={check_out}"
+            f"?destination={city}&startDate={_expedia_date(check_in)}&endDate={_expedia_date(check_out)}"
             f"&rooms=1&adults={adults}&currency={currency}&sort=PRICE_LOW_TO_HIGH"
         )
 
@@ -563,99 +573,16 @@ def scrape_hotels_com(
 #  Agoda - JSON API + Playwright fallback
 # ---------------------------------------------------------------------------
 
-def _agoda_city_id(city: str) -> str | None:
-    for endpoint in [
-        "https://www.agoda.com/api/cronos/property/typeahead/suggestion",
-        "https://www.agoda.com/api/cronos/searcher/suggestion",
-    ]:
-        try:
-            r = _client().get(
-                endpoint,
-                params={"fieldId": "destination", "query": city, "suggestLimit": 3,
-                        "language": "en-us"},
-                headers={
-                    "X-Agoda-Version": "2",
-                    "Accept": _JSON,
-                    "Referer": "https://www.agoda.com/",
-                },
-            )
-            if r.status_code == 200:
-                for s in (r.json() or []):
-                    if isinstance(s, dict):
-                        cid = s.get("cityId") or _dig(s, "id")
-                        if cid:
-                            return str(cid)
-        except Exception:
-            continue
-    return None
-
-
-def _agoda_api(city: str, check_in: str, check_out: str,
-               adults: int, currency: str) -> list[dict]:
-    search_url = f"https://www.agoda.com/search?city={city}&checkIn={check_in}&checkOut={check_out}"
-    city_id = _agoda_city_id(city)
-    if not city_id:
-        return []
-
-    for endpoint in [
-        "https://www.agoda.com/api/cronos/property/BePropertySearchResults",
-        "https://www.agoda.com/api/cronos/search/GetProperties",
-    ]:
-        try:
-            resp = _client().get(
-                endpoint,
-                params={
-                    "cityId": city_id, "checkIn": check_in, "checkOut": check_out,
-                    "rooms": 1, "adults": adults, "children": 0,
-                    "locale": "en-us", "currency": currency,
-                    "searchType": 5, "pageSize": 12, "pageNumber": 1,
-                    "sortField": 1, "sortOrder": 1,
-                },
-                headers={
-                    "X-Agoda-Version": "2",
-                    "Accept": _JSON,
-                    "Referer": "https://www.agoda.com/",
-                },
-            )
-            if resp.status_code != 200:
-                continue
-            data = resp.json()
-            props = (
-                _dig(data, "propertySearchResults", "properties")
-                or _dig(data, "data", "properties")
-                or _dig(data, "properties")
-                or []
-            )
-            out: list[dict] = []
-            for h in props[:12]:
-                name = h.get("propertyName") or h.get("name", "")
-                price = _parse_price(
-                    _dig(h, "pricing", "price")
-                    or _dig(h, "price", "perNight")
-                    or _dig(h, "offers", 0, "price")
-                    or 0
-                )
-                if name and price > 0:
-                    out.append({"title": name, "provider": "Agoda",
-                                "chain": _detect_chain(name),
-                                "price": price, "currency": currency,
-                                "per_night": True, "url": search_url})
-            if out:
-                return out
-        except Exception:
-            continue
-    return []
-
-
 def _agoda_pw_fallback(city: str, check_in: str, check_out: str,
                        adults: int, currency: str) -> list[dict]:
     from bs4 import BeautifulSoup
+    # Use searchText instead of city= (city= requires a numeric ID which is no longer resolvable)
     search_url = (
-        f"https://www.agoda.com/search?city={city}"
-        f"&checkIn={check_in}&checkOut={check_out}&rooms=1&adults={adults}"
+        f"https://www.agoda.com/search?searchText={city.replace(' ', '+')}"
+        f"&checkIn={check_in}&checkOut={check_out}&rooms=1&adults={adults}&currency={currency}"
     )
     html = _pw_get_html(
-        search_url + "&cid=-1",
+        search_url,
         wait_selector="[data-selenium='hotel-item'],[class*='hotel-item'],[class*='PropertyCard']",
         extra_wait_ms=4_000,
         timeout=30_000,
@@ -691,12 +618,9 @@ def _agoda_pw_fallback(city: str, check_in: str, check_out: str,
 def scrape_agoda(
     city: str, check_in: str, check_out: str, adults: int, currency: str
 ) -> list[dict]:
-    """Agoda - JSON API first, Playwright fallback."""
+    """Agoda - Playwright search (direct API endpoints are no longer active)."""
     try:
-        result = _agoda_api(city, check_in, check_out, adults, currency)
-        return result if result else _agoda_pw_fallback(
-            city, check_in, check_out, adults, currency
-        )
+        return _agoda_pw_fallback(city, check_in, check_out, adults, currency)
     except Exception:
         return []
 
@@ -1477,23 +1401,36 @@ def scrape_all_hotels(
     currency: str = "USD",
 ) -> tuple[list[dict], dict[str, str]]:
     """
-    Run ALL hotel scrapers (OTAs + chain websites) concurrently.
-    Playwright scrapers run in parallel - each thread manages its own browser.
+    Run ALL hotel scrapers concurrently.
+    API-based scrapers (SerpAPI / RapidAPI) run first — faster and more reliable.
+    Playwright scrapers (Booking.com etc.) run in parallel as fallback/supplement.
     Returns (sorted_hotels, platform_status).
     """
+    api_scrapers: dict[str, Any] = {
+        "Google Hotels":     scrape_serpapi,
+        "Booking.com (API)": scrape_rapidapi_booking,
+        "TripAdvisor":       scrape_rapidapi_tripadvisor,
+        "Priceline":         scrape_rapidapi_priceline,
+    }
+
     all_hotels: list[dict] = []
     status: dict[str, str] = {}
 
+    # Build the combined scraper map: API scrapers + Playwright scrapers
+    combined: dict[str, Any] = {}
+    for name, fn in api_scrapers.items():
+        combined[name] = fn
     pw_ok = _pw_available()
-    if not pw_ok:
-        for name in _ALL_SCRAPERS:
-            status[name] = "⚠ Playwright unavailable (install: playwright install chromium)"
-        return [], status
+    for name, fn in _ALL_SCRAPERS.items():
+        if pw_ok:
+            combined[name] = fn
+        else:
+            status[name] = "⚠ Playwright unavailable"
 
-    with ThreadPoolExecutor(max_workers=len(_ALL_SCRAPERS)) as pool:
+    with ThreadPoolExecutor(max_workers=len(combined)) as pool:
         futures = {
             pool.submit(fn, city, check_in, check_out, adults, currency): name
-            for name, fn in _ALL_SCRAPERS.items()
+            for name, fn in combined.items()
         }
         for future in as_completed(futures):
             name = futures[future]
@@ -1568,6 +1505,293 @@ def scrape_hotels_per_night(
                 })
 
     return sorted(night_results, key=lambda x: x["night"])
+
+
+# ---------------------------------------------------------------------------
+#  SerpAPI – Google Hotels  (needs SERPAPI_KEY, 100 free/month)
+# ---------------------------------------------------------------------------
+
+def scrape_serpapi(
+    city: str, check_in: str, check_out: str, adults: int, currency: str
+) -> list[dict]:
+    api_key = os.getenv("SERPAPI_KEY", "")
+    if not api_key:
+        return []
+    try:
+        r = httpx.get(
+            "https://serpapi.com/search.json",
+            params={
+                "engine": "google_hotels",
+                "q": f"hotels in {city}",
+                "check_in_date": check_in,
+                "check_out_date": check_out,
+                "adults": adults,
+                "currency": currency,
+                "hl": "en",
+                "gl": "us",
+                "api_key": api_key,
+            },
+            timeout=30,
+        )
+        if r.status_code != 200:
+            return []
+        out: list[dict] = []
+        for prop in r.json().get("properties", [])[:15]:
+            name = prop.get("name", "")
+            price = float(prop.get("rate_per_night", {}).get("extracted_lowest", 0) or 0)
+            if name and price > 0:
+                out.append({
+                    "title": name,
+                    "provider": "Google Hotels",
+                    "chain": _detect_chain(name),
+                    "price": price,
+                    "currency": currency,
+                    "per_night": True,
+                    "url": prop.get("link", ""),
+                })
+        return out
+    except Exception:
+        return []
+
+
+# ---------------------------------------------------------------------------
+#  RapidAPI – Booking.com  (needs RAPIDAPI_KEY, 500 free/month)
+# ---------------------------------------------------------------------------
+
+def _rapidapi_headers(host: str) -> dict:
+    return {
+        "X-RapidAPI-Key":  os.getenv("RAPIDAPI_KEY", ""),
+        "X-RapidAPI-Host": host,
+    }
+
+
+def _rapidapi_booking_dest_id(city: str) -> str | None:
+    try:
+        r = httpx.get(
+            "https://booking-com15.p.rapidapi.com/api/v1/hotels/searchDestination",
+            params={"query": city},
+            headers=_rapidapi_headers("booking-com15.p.rapidapi.com"),
+            timeout=15,
+        )
+        if r.status_code != 200:
+            return None
+        for item in r.json().get("data", []):
+            if item.get("search_type") in ("city", "district", "region"):
+                return str(item["dest_id"])
+    except Exception:
+        pass
+    return None
+
+
+def scrape_rapidapi_booking(
+    city: str, check_in: str, check_out: str, adults: int, currency: str
+) -> list[dict]:
+    if not os.getenv("RAPIDAPI_KEY"):
+        return []
+    try:
+        dest_id = _rapidapi_booking_dest_id(city)
+        if not dest_id:
+            return []
+        r = httpx.get(
+            "https://booking-com15.p.rapidapi.com/api/v1/hotels/searchHotels",
+            params={
+                "dest_id": dest_id,
+                "search_type": "CITY",
+                "arrival_date": check_in,
+                "departure_date": check_out,
+                "adults": str(adults),
+                "currency_code": currency,
+                "sort_by": "popularity",
+                "page_number": "1",
+                "units": "metric",
+            },
+            headers=_rapidapi_headers("booking-com15.p.rapidapi.com"),
+            timeout=30,
+        )
+        if r.status_code != 200:
+            return []
+        search_url = (
+            f"https://www.booking.com/searchresults.html"
+            f"?ss={city.replace(' ', '+')}&checkin={check_in}&checkout={check_out}"
+        )
+        out: list[dict] = []
+        for h in r.json().get("data", {}).get("hotels", [])[:15]:
+            prop = h.get("property", {})
+            name = prop.get("name", "")
+            price_obj = prop.get("priceBreakdown", {}).get("grossPrice", {})
+            price = float(price_obj.get("value", 0) or 0)
+            if name and price > 0:
+                out.append({
+                    "title": name,
+                    "provider": "Booking.com (API)",
+                    "chain": _detect_chain(name),
+                    "price": price,
+                    "currency": price_obj.get("currency", currency),
+                    "per_night": True,
+                    "url": search_url,
+                })
+        return out
+    except Exception:
+        return []
+
+
+# ---------------------------------------------------------------------------
+#  RapidAPI – TripAdvisor  (same RAPIDAPI_KEY, 500 free/month)
+# ---------------------------------------------------------------------------
+
+def _rapidapi_tripadvisor_geo_id(city: str) -> str | None:
+    try:
+        r = httpx.get(
+            "https://tripadvisor16.p.rapidapi.com/api/v1/hotels/searchLocation",
+            params={"query": city},
+            headers=_rapidapi_headers("tripadvisor16.p.rapidapi.com"),
+            timeout=15,
+        )
+        if r.status_code != 200:
+            return None
+        for item in r.json().get("data", []):
+            geo_id = item.get("geoId") or item.get("locationId")
+            if geo_id:
+                return str(geo_id)
+    except Exception:
+        pass
+    return None
+
+
+def scrape_rapidapi_tripadvisor(
+    city: str, check_in: str, check_out: str, adults: int, currency: str
+) -> list[dict]:
+    if not os.getenv("RAPIDAPI_KEY"):
+        return []
+    try:
+        geo_id = _rapidapi_tripadvisor_geo_id(city)
+        if not geo_id:
+            return []
+        r = httpx.get(
+            "https://tripadvisor16.p.rapidapi.com/api/v1/hotels/searchHotels",
+            params={
+                "geoId": geo_id,
+                "checkIn": check_in,
+                "checkOut": check_out,
+                "adults": str(adults),
+                "currencyCode": currency,
+                "sort": "POPULARITY",
+                "limit": "15",
+            },
+            headers=_rapidapi_headers("tripadvisor16.p.rapidapi.com"),
+            timeout=30,
+        )
+        if r.status_code != 200:
+            return []
+        search_url = f"https://www.tripadvisor.com/Hotels-g-{city.replace(' ', '_')}-Hotels.html"
+        out: list[dict] = []
+        for h in (r.json().get("data", {}).get("data", []) or [])[:12]:
+            name = h.get("title", "")
+            price = _parse_price(
+                _dig(h, "priceDetails", "price")
+                or _dig(h, "commerceInfo", "priceForDisplay", "text")
+                or 0
+            )
+            if name and price > 0:
+                link = _dig(h, "cardLink", "route", "url") or search_url
+                out.append({
+                    "title": name,
+                    "provider": "TripAdvisor",
+                    "chain": _detect_chain(name),
+                    "price": price,
+                    "currency": currency,
+                    "per_night": True,
+                    "url": f"https://www.tripadvisor.com{link}" if link.startswith("/") else link,
+                })
+        return out
+    except Exception:
+        return []
+
+
+# ---------------------------------------------------------------------------
+#  RapidAPI – Priceline  (same RAPIDAPI_KEY)
+# ---------------------------------------------------------------------------
+
+def scrape_rapidapi_priceline(
+    city: str, check_in: str, check_out: str, adults: int, currency: str
+) -> list[dict]:
+    if not os.getenv("RAPIDAPI_KEY"):
+        return []
+    try:
+        host = "priceline-com-provider.p.rapidapi.com"
+        headers = _rapidapi_headers(host)
+
+        # Step 1: resolve location ID
+        loc_r = httpx.get(
+            f"https://{host}/v1/hotels/locations",
+            params={"name": city, "search_type": "ALL"},
+            headers=headers,
+            timeout=15,
+        )
+        if loc_r.status_code != 200:
+            return []
+        loc_data = loc_r.json()
+        city_id = None
+        for item in (loc_data.get("getHotelAutoSuggestV2", {})
+                     .get("results", {}).get("result", []) or []):
+            if item.get("type") in ("CITY", "DESTINATION", "NEIGHBORHOOD"):
+                city_id = item.get("id") or item.get("cityID")
+                if city_id:
+                    break
+
+        if not city_id:
+            return []
+
+        # Step 2: search hotels
+        search_url = (
+            f"https://www.priceline.com/hotel/search"
+            f"?city={city.replace(' ', '+')}&checkIn={check_in}&checkOut={check_out}"
+        )
+        r = httpx.get(
+            f"https://{host}/v1/hotels/search",
+            params={
+                "location_id": city_id,
+                "date_checkin": check_in,
+                "date_checkout": check_out,
+                "rooms_number": "1",
+                "adults_number": str(adults),
+                "order_by": "HDR_HOTELSCORE",
+                "currency": currency,
+                "page_number": "1",
+                "page_size": "15",
+            },
+            headers=headers,
+            timeout=30,
+        )
+        if r.status_code != 200:
+            return []
+
+        hotels_raw = (
+            _dig(r.json(), "getHotelResults", "results", "hotels")
+            or _dig(r.json(), "results", "hotels")
+            or []
+        )
+        out: list[dict] = []
+        for h in hotels_raw[:12]:
+            name = h.get("hotelName") or h.get("name", "")
+            price = _parse_price(
+                _dig(h, "ratesSummary", "minCurrencySymbol") or
+                _dig(h, "ratesSummary", "minPrice") or
+                _dig(h, "pricing", "price") or 0
+            )
+            if name and price > 0:
+                out.append({
+                    "title": name,
+                    "provider": "Priceline",
+                    "chain": _detect_chain(name),
+                    "price": price,
+                    "currency": currency,
+                    "per_night": True,
+                    "url": search_url,
+                })
+        return out
+    except Exception:
+        return []
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────

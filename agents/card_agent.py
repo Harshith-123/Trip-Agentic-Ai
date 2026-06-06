@@ -1,15 +1,13 @@
 """
-Card Agent - uses Claude to analyze real card benefits for a destination.
-Claude draws on its knowledge of actual card terms (lounge access, forex markup,
+Card Agent - uses an LLM to analyze real card benefits for a destination.
+The LLM draws on its knowledge of actual card terms (lounge access, forex markup,
 reward multipliers, cashback) rather than fabricating random numbers.
 """
 import json
-import os
 from typing import List
 
-import anthropic
-
 from models import Card, CardOffer
+from agents.llm import get_llm
 
 CATEGORIES = ["flight", "hotel", "car", "attraction"]
 
@@ -41,28 +39,24 @@ Return ONLY a valid JSON array (no markdown fences) with one object per category
 
 
 def fetch_card_offers(cards: List[Card], destination: str) -> List[CardOffer]:
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
+    llm = get_llm()
+    if llm is None:
         return []
 
-    client = anthropic.Anthropic(api_key=api_key)
     all_offers: List[CardOffer] = []
 
     for card in cards:
         prompt = (
+            f"{_SYSTEM}\n\n"
             f"Card: {card.name} ({card.bank}, {card.network.upper()} {card.card_type})\n"
             f"Destination: {destination}\n"
             f"Categories: {CATEGORIES}\n"
             "Return one offer object per category."
         )
         try:
-            response = client.messages.create(
-                model="claude-haiku-4-5-20251001",
-                max_tokens=1024,
-                system=_SYSTEM,
-                messages=[{"role": "user", "content": prompt}],
-            )
-            raw = response.content[0].text.strip()
+            from langchain_core.messages import HumanMessage
+            response = llm.invoke([HumanMessage(content=prompt)])
+            raw = response.content.strip()
             # Strip markdown fences if model adds them
             if raw.startswith("```"):
                 lines = raw.split("\n")

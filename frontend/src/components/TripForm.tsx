@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { CreditCard, MapPin, Calendar, Users, DollarSign, Trash2, Plus } from 'lucide-react';
 
 interface Card {
@@ -21,6 +21,10 @@ const NET_BG: Record<string, string> = {
 
 function today()        { return new Date().toISOString().split('T')[0]; }
 function daysLater(n: number) { const d = new Date(); d.setDate(d.getDate() + n); return d.toISOString().split('T')[0]; }
+function daysFromDate(dateStr: string, n: number) {
+  try { const d = new Date(dateStr); d.setDate(d.getDate() + n); return d.toISOString().split('T')[0]; }
+  catch { return dateStr; }
+}
 
 export default function TripForm({ onStart }: Props) {
   const [step, setStep]       = useState<1 | 2>(1);
@@ -33,11 +37,19 @@ export default function TripForm({ onStart }: Props) {
   const [retDate, setRetDate] = useState(daysLater(7));
   const [adults, setAdults]   = useState(1);
   const [currency, setCurrency] = useState('USD');
-  const [hotelSame, setHotelSame] = useState(true);
-  const [hotelIn, setHotelIn]   = useState('');
-  const [hotelOut, setHotelOut] = useState('');
+  const [hotelIn, setHotelIn]   = useState(daysLater(1));
+  const [hotelOut, setHotelOut] = useState(daysLater(7));
   const [error, setError]     = useState('');
   const [loading, setLoading] = useState(false);
+
+  // Keep hotel dates in sync with flight dates unless user has manually changed them
+  useEffect(() => {
+    setHotelIn(daysFromDate(checkIn, 1));
+  }, [checkIn]);
+
+  useEffect(() => {
+    if (tripType === 'round-trip') setHotelOut(retDate);
+  }, [retDate, tripType]);
 
   function addCard() {
     const { name, bank, number_last4 } = cardForm;
@@ -54,7 +66,8 @@ export default function TripForm({ onStart }: Props) {
     if (org === dst)                                       { setError('Origin and destination cannot be the same.'); return; }
     if (org.length !== 3 || dst.length !== 3)             { setError('Airport codes must be 3 letters (e.g. BLR, JFK).'); return; }
     if (tripType === 'round-trip' && retDate <= checkIn)  { setError('Return date must be after departure.'); return; }
-    if (!hotelSame && (!hotelIn || !hotelOut))            { setError('Fill in both custom hotel dates.'); return; }
+    if (!hotelIn || !hotelOut)                            { setError('Fill in both hotel dates.'); return; }
+    if (hotelOut <= hotelIn)                              { setError('Hotel check-out must be after check-in.'); return; }
     if (!cards.length)                                    { setError('Add at least one card.'); return; }
     setError(''); setLoading(true);
     try {
@@ -64,7 +77,7 @@ export default function TripForm({ onStart }: Props) {
           cards, origin: org, destination: dst,
           check_in: checkIn, check_out: tripType === 'round-trip' ? retDate : checkIn,
           trip_type: tripType, return_date: tripType === 'round-trip' ? retDate : '',
-          hotel_check_in: hotelSame ? '' : hotelIn, hotel_check_out: hotelSame ? '' : hotelOut,
+          hotel_check_in: hotelIn, hotel_check_out: hotelOut,
           adults, currency,
         }),
       });
@@ -237,34 +250,20 @@ export default function TripForm({ onStart }: Props) {
 
           {/* Hotel */}
           <div className="card-white workflow-card p-5">
-            <div className="flex items-center justify-between mb-4">
-              <p className="text-xs font-bold text-gray-400 uppercase tracking-widest flex items-center gap-1.5">
-                🏨 Hotel Dates
-              </p>
-              <label className="flex items-center gap-2 text-xs text-gray-500 cursor-pointer select-none">
-                <div className={`w-9 h-5 rounded-full transition-colors relative ${hotelSame ? 'bg-[#003580]' : 'bg-gray-200'}`}
-                  onClick={() => setHotelSame(p => !p)}>
-                  <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${hotelSame ? 'translate-x-4' : 'translate-x-0.5'}`} />
-                </div>
-                Auto-compute
-              </label>
+            <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-1 flex items-center gap-1.5">
+              🏨 Hotel Dates
+            </p>
+            <p className="text-xs text-slate-400 mb-4">Pre-filled with your estimated arrival day — adjust if your flight takes longer.</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="label-sm"><Calendar size={10} className="inline mr-1" />Check-in (arrival day)</label>
+                <input type="date" className="input-field" value={hotelIn} onChange={e => setHotelIn(e.target.value)} />
+              </div>
+              <div>
+                <label className="label-sm"><Calendar size={10} className="inline mr-1" />Check-out</label>
+                <input type="date" className="input-field" value={hotelOut} onChange={e => setHotelOut(e.target.value)} />
+              </div>
             </div>
-            {hotelSame ? (
-              <div className="bg-blue-50 border border-blue-100 rounded-xl px-4 py-3 text-xs text-blue-600 font-medium">
-                📅 Hotel check-in = departure date · Check-out = return date
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="label-sm">Check-in</label>
-                  <input type="date" className="input-field" value={hotelIn} onChange={e => setHotelIn(e.target.value)} />
-                </div>
-                <div>
-                  <label className="label-sm">Check-out</label>
-                  <input type="date" className="input-field" value={hotelOut} onChange={e => setHotelOut(e.target.value)} />
-                </div>
-              </div>
-            )}
           </div>
 
           {error && <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-sm text-red-600">{error}</div>}

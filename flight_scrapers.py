@@ -705,25 +705,43 @@ def scrape_all_flights(
             except Exception as exc:
                 platform_status[name] = f"✗ failed: {exc}"
 
-    # Deduplicate: same airline+price within 5% = same listing
-    # Filter out unnamed "Option X" flights — they have no airline/schedule data
-    seen: list[dict] = []
-    for f in sorted(all_flights, key=lambda x: x["price"]):
-        airline = f.get("airline", "")
-        if airline.startswith("Option "):
-            continue
-        duplicate = any(
-            airline == s.get("airline", "")
-            and abs(f["price"] - s["price"]) / max(s["price"], 1) < 0.05
-            for s in seen
-        )
-        if not duplicate:
-            seen.append(f)
-
-    return seen, platform_status
+    return _dedup_flights(all_flights), platform_status
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
+
+def _flight_airline(f: dict) -> str:
+    """Extract airline name from whichever key the scraper used."""
+    for key in ("airlines", "airline"):
+        val = f.get(key, "")
+        if val and not str(val).startswith("Option "):
+            return str(val).lower().strip()
+    # Fall back: pull airline out of "Duffel (Lufthansa)" or similar
+    provider = f.get("provider", "")
+    m = re.search(r'\((.+?)\)', provider)
+    return m.group(1).lower().strip() if m else provider.lower().strip()
+
+
+def _dedup_flights(flights: list[dict]) -> list[dict]:
+    """
+    Collapse duplicate flight listings.
+    Two flights are the same itinerary if they share:
+      (airline, departure-date, stop-count)
+    Keep only the cheapest fare per combination.
+    Also drops unnamed 'Option X' entries with no schedule data.
+    """
+    best: dict[tuple, dict] = {}
+    for f in flights:
+        airline = _flight_airline(f)
+        if airline.startswith("option "):
+            continue
+        dep_day = str(f.get("departure", ""))[:10]
+        stops   = f.get("stops", -1)
+        key     = (airline, dep_day, stops)
+        if key not in best or f["price"] < best[key]["price"]:
+            best[key] = f
+    return sorted(best.values(), key=lambda x: x["price"])
+
 
 def _dig(d: Any, *keys) -> Any:
     for k in keys:

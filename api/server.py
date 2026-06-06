@@ -20,6 +20,9 @@ import threading
 import uuid
 from typing import Any, Optional
 
+from dotenv import load_dotenv
+load_dotenv()
+
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -202,6 +205,17 @@ async def run_trip(payload: TripPayload):
 
     payload.origin      = origin
     payload.destination = dest
+
+    # Hotel dates: default check-in to arrival day (departure + 1), check-out to return date
+    if not payload.hotel_check_in:
+        from datetime import datetime, timedelta
+        try:
+            arrival = datetime.strptime(payload.check_in, "%Y-%m-%d") + timedelta(days=1)
+            payload.hotel_check_in = arrival.strftime("%Y-%m-%d")
+        except ValueError:
+            payload.hotel_check_in = payload.check_in
+    if not payload.hotel_check_out:
+        payload.hotel_check_out = payload.return_date or payload.check_out
 
     session_id = str(uuid.uuid4())
     thread = threading.Thread(

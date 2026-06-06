@@ -31,23 +31,14 @@ function AgentPageContent() {
   const [sessionId, setSessionId] = useState('');
   const [result, setResult]       = useState<SessionResult | null>(null);
 
-  // If home page already started a session, check if it's still valid before reconnecting
+  // If home page already started a session, go straight to running.
+  // The WebSocket handles retries and errors; no pre-check needed.
   useEffect(() => {
     const sid = searchParams.get('session');
     if (!sid) return;
-    // Check session status - ignore stale/completed sessions
-    fetch(`/api/session/${sid}`).then(r => r.json()).then(data => {
-      if (data.status === 'not_found' || data.status === 'complete' || data.status === 'error') {
-        // Session already done or not found → start fresh
-        router.replace('/agent');
-        return;
-      }
-      setSessionId(sid);
-      setStep('running');
-    }).catch(() => {
-      // Backend down → stay on form
-    });
-  }, [searchParams, router]);
+    setSessionId(sid);
+    setStep('running');
+  }, [searchParams]);
 
   function handleStart(sid: string)          { setSessionId(sid); setStep('running'); }
   function handleComplete(res: SessionResult) { setResult(res); setStep('done'); router.replace('/agent'); }

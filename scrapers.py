@@ -42,21 +42,51 @@ def get_weather(city: str) -> dict:
         return {"error": str(e), "city": city}
 
 
+def _disambiguate(city: str) -> str:
+    """Return a more specific Wikipedia title for cities that are ambiguous."""
+    _SPECIFICS = {
+        "Phoenix":      "Phoenix, Arizona",
+        "Denver":       "Denver, Colorado",
+        "Austin":       "Austin, Texas",
+        "Portland":     "Portland, Oregon",
+        "Charlotte":    "Charlotte, North Carolina",
+        "Nashville":    "Nashville, Tennessee",
+        "Columbus":     "Columbus, Ohio",
+        "Memphis":      "Memphis, Tennessee",
+        "Richmond":     "Richmond, Virginia",
+        "Springfield":  "Springfield, Illinois",
+        "Cambridge":    "Cambridge, England",
+        "Nice":         "Nice, France",
+        "Florence":     "Florence, Italy",
+        "Rome":         "Rome, Italy",
+        "Milan":        "Milan, Italy",
+        "Venice":       "Venice, Italy",
+    }
+    return _SPECIFICS.get(city, city)
+
+
 def get_attractions(city: str) -> dict:
     """Top tourist attractions via Wikipedia search API."""
     try:
+        specific = _disambiguate(city)
         r = _HTTP.get(
             "https://en.wikipedia.org/w/api.php",
             params={
                 "action": "query",
                 "list": "search",
-                "srsearch": f"{city} tourist attractions landmarks must visit",
+                "srsearch": f"tourist attractions {specific}",
                 "format": "json",
                 "srlimit": 8,
             },
         )
         r.raise_for_status()
         results = r.json().get("query", {}).get("search", [])
+        # Filter: keep only results whose title contains the city name
+        city_lower = city.lower()
+        filtered = [
+            item for item in results
+            if city_lower in item["title"].lower() or specific.lower() in item["title"].lower()
+        ] or results  # fall back to all if nothing matches
         attractions = [
             {
                 "name": item["title"],
@@ -65,7 +95,7 @@ def get_attractions(city: str) -> dict:
                 .replace("</span>", "")
                 .replace("&#039;", "'"),
             }
-            for item in results
+            for item in filtered[:6]
         ]
         return {"city": city, "attractions": attractions}
     except Exception as e:
@@ -103,7 +133,7 @@ def get_city_info(city: str) -> dict:
                 "exintro": True,
                 "explaintext": True,
                 "redirects": True,
-                "titles": city,
+                "titles": _disambiguate(city),
                 "format": "json",
             },
         )
