@@ -14,6 +14,7 @@ flask>=3.0.0          # kept for legacy app.py
 langgraph>=0.2.0
 langchain>=0.3.0
 langchain-core>=0.3.0
+google-adk>=1.0.0
 
 # ── LLM providers (install whichever you have a key for) ─────────────────────
 langchain-groq>=0.2.0         # GROQ_API_KEY  (free tier, fastest)

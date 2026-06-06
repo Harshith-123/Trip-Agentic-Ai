@@ -701,7 +701,7 @@ def scrape_all_flights(
             try:
                 results = future.result()
                 all_flights.extend(results)
-                platform_status[name] = f"✓ {len(results)} results"
+                platform_status[name] = f"✓ {len(results)} results" if results else "⚠ 0 results"
             except Exception as exc:
                 platform_status[name] = f"✗ failed: {exc}"
 

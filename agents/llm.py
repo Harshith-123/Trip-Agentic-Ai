@@ -60,7 +60,7 @@ def _try(provider: str):
             return ChatGroq(
                 model="llama-3.3-70b-versatile",
                 temperature=0,
-                max_tokens=1024,
+                max_tokens=4000,
                 api_key=key,
             )
 
@@ -72,7 +72,7 @@ def _try(provider: str):
             return ChatAnthropic(
                 model="claude-haiku-4-5-20251001",
                 temperature=0,
-                max_tokens=1024,
+                max_tokens=4000,
                 api_key=key,
             )
 
@@ -84,7 +84,7 @@ def _try(provider: str):
             return ChatOpenAI(
                 model="gpt-4o-mini",
                 temperature=0,
-                max_tokens=1024,
+                max_tokens=4000,
                 api_key=key,
             )
 

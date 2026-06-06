@@ -1437,9 +1437,23 @@ def scrape_all_hotels(
             try:
                 results = future.result()
                 all_hotels.extend(results)
-                status[name] = f"✓ {len(results)} results"
+                if results:
+                    status[name] = f"✓ {len(results)} results"
+                elif name == "Priceline":
+                    status[name] = (
+                        "⚠ 0 parsed results - verify manually: "
+                        f"{_priceline_search_url(city, check_in, check_out, adults)}"
+                    )
+                else:
+                    status[name] = "⚠ 0 results"
             except Exception as exc:
-                status[name] = f"✗ failed: {exc}"
+                if name == "Priceline":
+                    status[name] = (
+                        f"✗ failed: {exc}. Direct check: "
+                        f"{_priceline_search_url(city, check_in, check_out, adults)}"
+                    )
+                else:
+                    status[name] = f"✗ failed: {exc}"
 
     return _deduplicate(all_hotels), status
 
@@ -1715,10 +1729,58 @@ def scrape_rapidapi_tripadvisor(
 def scrape_rapidapi_priceline(
     city: str, check_in: str, check_out: str, adults: int, currency: str
 ) -> list[dict]:
+    public_url = _priceline_search_url(city, check_in, check_out, adults)
     if not os.getenv("RAPIDAPI_KEY"):
-        return []
+        return scrape_priceline_public(city, check_in, check_out, adults, currency)
+    errors: list[str] = []
+    for host in _priceline_rapidapi_hosts():
+        try:
+            out = _scrape_priceline_rapidapi_host(
+                host, city, check_in, check_out, adults, currency, public_url
+            )
+            if out:
+                return out
+        except RuntimeError as exc:
+            errors.append(f"{host}: {exc}")
+            continue
+        except Exception as exc:
+            errors.append(f"{host}: {type(exc).__name__}")
+            continue
+
+    public_results = scrape_priceline_public(city, check_in, check_out, adults, currency)
+    if public_results:
+        return public_results
+    if errors:
+        raise RuntimeError("; ".join(errors))
+    return []
+
+
+def _priceline_rapidapi_hosts() -> list[str]:
+    configured = os.getenv("PRICELINE_RAPIDAPI_HOSTS") or os.getenv("PRICELINE_RAPIDAPI_HOST")
+    if configured:
+        return [h.strip() for h in configured.split(",") if h.strip()]
+    return [
+        "priceline-com2.p.rapidapi.com",
+        "priceline-com-provider.p.rapidapi.com",
+        "priceline-com.p.rapidapi.com",
+    ]
+
+
+def _scrape_priceline_rapidapi_host(
+    host: str,
+    city: str,
+    check_in: str,
+    check_out: str,
+    adults: int,
+    currency: str,
+    public_url: str,
+) -> list[dict]:
     try:
-        host = "priceline-com-provider.p.rapidapi.com"
+        if host == "priceline-com2.p.rapidapi.com":
+            return _scrape_priceline_com2_host(
+                host, city, check_in, check_out, adults, currency, public_url
+            )
+
         headers = _rapidapi_headers(host)
 
         # Step 1: resolve location ID
@@ -1729,7 +1791,7 @@ def scrape_rapidapi_priceline(
             timeout=15,
         )
         if loc_r.status_code != 200:
-            return []
+            raise RuntimeError(_rapidapi_priceline_error(loc_r.status_code, loc_r.text))
         loc_data = loc_r.json()
         city_id = None
         for item in (loc_data.get("getHotelAutoSuggestV2", {})
@@ -1743,10 +1805,6 @@ def scrape_rapidapi_priceline(
             return []
 
         # Step 2: search hotels
-        search_url = (
-            f"https://www.priceline.com/hotel/search"
-            f"?city={city.replace(' ', '+')}&checkIn={check_in}&checkOut={check_out}"
-        )
         r = httpx.get(
             f"https://{host}/v1/hotels/search",
             params={
@@ -1764,7 +1822,7 @@ def scrape_rapidapi_priceline(
             timeout=30,
         )
         if r.status_code != 200:
-            return []
+            raise RuntimeError(_rapidapi_priceline_error(r.status_code, r.text))
 
         hotels_raw = (
             _dig(r.json(), "getHotelResults", "results", "hotels")
@@ -1775,8 +1833,8 @@ def scrape_rapidapi_priceline(
         for h in hotels_raw[:12]:
             name = h.get("hotelName") or h.get("name", "")
             price = _parse_price(
-                _dig(h, "ratesSummary", "minCurrencySymbol") or
                 _dig(h, "ratesSummary", "minPrice") or
+                _dig(h, "ratesSummary", "minRate") or
                 _dig(h, "pricing", "price") or 0
             )
             if name and price > 0:
@@ -1787,11 +1845,256 @@ def scrape_rapidapi_priceline(
                     "price": price,
                     "currency": currency,
                     "per_night": True,
-                    "url": search_url,
+                    "url": public_url,
                 })
         return out
+    except RuntimeError:
+        raise
+    except Exception as exc:
+        raise RuntimeError(f"Priceline API request failed: {type(exc).__name__}") from exc
+
+
+def _scrape_priceline_com2_host(
+    host: str,
+    city: str,
+    check_in: str,
+    check_out: str,
+    adults: int,
+    currency: str,
+    public_url: str,
+) -> list[dict]:
+    """Priceline com2 RapidAPI variant.
+
+    The known endpoint is /hotels/auto-complete?query=<city>. The hotel search
+    endpoint path can be overridden once the RapidAPI docs expose the exact curl.
+    """
+    headers = _rapidapi_headers(host)
+    loc_r = httpx.get(
+        f"https://{host}/hotels/auto-complete",
+        params={"query": city},
+        headers=headers,
+        timeout=15,
+    )
+    if loc_r.status_code != 200:
+        raise RuntimeError(_rapidapi_priceline_error(loc_r.status_code, loc_r.text))
+
+    loc_data = loc_r.json()
+    location_id, location_payload = _extract_priceline_com2_location(loc_data)
+    if not location_id and not location_payload:
+        raise RuntimeError("Priceline com2 autocomplete returned no usable hotel location")
+
+    search_path = os.getenv("PRICELINE_COM2_HOTEL_SEARCH_PATH", "/hotels/search")
+    # priceline-com2 docs currently show only: /hotels/search?locationId=<id>
+    # Keep this minimal so RapidAPI does not reject unknown query params.
+    search_params = {}
+    if location_id:
+        search_params["locationId"] = location_id
+
+    r = httpx.get(
+        f"https://{host}{search_path}",
+        params=search_params,
+        headers=headers,
+        timeout=30,
+    )
+    if r.status_code != 200:
+        raise RuntimeError(
+            _rapidapi_priceline_error(r.status_code, r.text)
+            + f"; set PRICELINE_COM2_HOTEL_SEARCH_PATH if this API uses a different hotel search endpoint"
+        )
+
+    out = _extract_priceline_hotels(r.json(), currency, public_url)
+    if not out:
+        raise RuntimeError("Priceline com2 hotel search returned no parsable hotel prices")
+    return out
+
+
+def _extract_priceline_com2_location(data: Any) -> tuple[str, dict[str, str]]:
+    """Extract a location id and useful location fields from com2 autocomplete."""
+    candidates: list[dict] = []
+
+    def walk(node: Any) -> None:
+        if isinstance(node, dict):
+            if any(k in node for k in ("id", "locationId", "cityID", "cityId", "destId")):
+                candidates.append(node)
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    walk(data)
+    if not candidates:
+        return "", {}
+
+    first = candidates[0]
+    location_id = str(
+        first.get("locationId")
+        or first.get("id")
+        or first.get("cityID")
+        or first.get("cityId")
+        or first.get("destId")
+        or ""
+    )
+    payload: dict[str, str] = {}
+    for src, dest in [
+        ("cityId", "cityId"),
+        ("cityID", "cityID"),
+        ("destId", "destId"),
+        ("type", "type"),
+        ("displayName", "displayName"),
+        ("name", "name"),
+    ]:
+        value = first.get(src)
+        if value:
+            payload[dest] = str(value)
+    return location_id, payload
+
+
+def _rapidapi_priceline_error(status_code: int, body: str) -> str:
+    if status_code == 403 and "not subscribed" in body.lower():
+        return (
+            "Priceline API subscription missing for PRICELINE_RAPIDAPI_HOST "
+            "(subscribe this RapidAPI app or set PRICELINE_RAPIDAPI_HOST to your subscribed Priceline provider)"
+        )
+    if status_code == 429:
+        return "Priceline RapidAPI rate limit exceeded; wait for quota reset or upgrade the RapidAPI plan"
+    return f"Priceline API returned HTTP {status_code}"
+
+
+def _priceline_search_url(city: str, check_in: str, check_out: str, adults: int) -> str:
+    from urllib.parse import urlencode
+
+    return "https://www.priceline.com/hotel/search?" + urlencode({
+        "searchType": "CITY",
+        "location": city,
+        "checkIn": check_in,
+        "checkOut": check_out,
+        "adults": adults,
+        "rooms": 1,
+    })
+
+
+def _priceline_relax_url(city: str, check_in: str, check_out: str, adults: int) -> str:
+    from urllib.parse import quote_plus
+
+    city_slug = quote_plus(city.strip().replace(",", ""))
+    start = check_in.replace("-", "")
+    end = check_out.replace("-", "")
+    return (
+        f"https://www.priceline.com/relax/in/{city_slug}/from/{start}/to/{end}/rooms/1"
+        f"?adults={adults}"
+    )
+
+
+def scrape_priceline_public(
+    city: str, check_in: str, check_out: str, adults: int, currency: str
+) -> list[dict]:
+    """Priceline public-site fallback using API capture + embedded JSON parsing."""
+    search_url = _priceline_search_url(city, check_in, check_out, adults)
+    relax_url = _priceline_relax_url(city, check_in, check_out, adults)
+    try:
+        api_patterns = [
+            "priceline.com/pws/", "priceline.com/pws/v0", "priceline.com/pws/v1",
+            "priceline.com/relax/", "/api/", "/hotel/",
+            "hotels/search", "hotel/listing", "hotel/results", "hotel-retail",
+            "getHotelResults", "hotelResults", "searchResults", "propertySearch",
+        ]
+        for url in (search_url, relax_url):
+            captured = _pw_capture_hotel_api(url, api_patterns=api_patterns, timeout=45_000)
+            for data in captured:
+                out = _extract_priceline_hotels(data, currency, url)
+                if out:
+                    return out
+
+        html = ""
+        for url in (search_url, relax_url):
+            html = _pw_get_html(
+                url,
+                wait_selector="[data-testid*='hotel'],[class*='hotel'],[class*='Hotel'],[class*='property']",
+                extra_wait_ms=6_000,
+                timeout=45_000,
+            )
+            out = _extract_priceline_hotels(_extract_next_data(html), currency, url)
+            if out:
+                return out
+            out = _extract_priceline_html(html, currency, url)
+            if out:
+                return out
+
+        return _extract_priceline_html(html, currency, search_url)
     except Exception:
         return []
+
+
+def _extract_priceline_hotels(data: Any, currency: str, search_url: str) -> list[dict]:
+    """Walk nested Priceline JSON and pull plausible hotel cards."""
+    out: list[dict] = []
+    seen: set[str] = set()
+
+    def walk(node: Any) -> None:
+        if len(out) >= 15:
+            return
+        if isinstance(node, dict):
+            name = (
+                node.get("hotelName") or node.get("name") or node.get("propertyName")
+                or node.get("displayName") or node.get("hotel_name")
+            )
+            price = _parse_price(
+                _dig(node, "ratesSummary", "minPrice")
+                or _dig(node, "ratesSummary", "minRate")
+                or _dig(node, "price", "amount")
+                or _dig(node, "pricing", "price")
+                or node.get("minPrice")
+                or node.get("rate")
+                or node.get("price")
+                or 0
+            )
+            if name and 10 <= price <= 5000:
+                key = str(name).strip().lower()
+                if key not in seen:
+                    seen.add(key)
+                    out.append({
+                        "title": str(name).strip(),
+                        "provider": "Priceline",
+                        "chain": _detect_chain(str(name)),
+                        "price": price,
+                        "currency": currency,
+                        "per_night": True,
+                        "url": search_url,
+                    })
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    walk(data)
+    return sorted(out, key=lambda h: h["price"])
+
+
+def _extract_priceline_html(html: str, currency: str, search_url: str) -> list[dict]:
+    names = re.findall(r'"(?:hotelName|propertyName|name|displayName)"\s*:\s*"([^"{}]{3,100})"', html)
+    prices = re.findall(r'"(?:minPrice|minRate|amount|price)"\s*:\s*([\d.]{2,8})', html)
+    out: list[dict] = []
+    seen: set[str] = set()
+    for name, raw_price in zip(names, prices):
+        clean = name.encode("utf-8", "ignore").decode("unicode_escape", "ignore").strip()
+        price = _parse_price(raw_price)
+        if clean.lower() in seen or not clean or not (10 <= price <= 5000):
+            continue
+        seen.add(clean.lower())
+        out.append({
+            "title": clean,
+            "provider": "Priceline",
+            "chain": _detect_chain(clean),
+            "price": price,
+            "currency": currency,
+            "per_night": True,
+            "url": search_url,
+        })
+        if len(out) >= 15:
+            break
+    return sorted(out, key=lambda h: h["price"])
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
