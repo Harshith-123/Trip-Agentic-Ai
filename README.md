@@ -174,6 +174,47 @@ Prompts for cards and trip details interactively, saves `trip_report.md`.
 
 ---
 
+### Option D - Google ADK Agent
+
+The project also exposes the same deterministic travel pipeline as a Google ADK agent.
+Use this when you want an agent runtime around the existing scrapers/card engine without changing the web app.
+
+```bash
+pip install -r requirements.txt
+adk web
+```
+
+Then select `adk_travel_agent` in the ADK web UI.
+
+Set this in `.env` for Gemini-backed ADK runs:
+
+```env
+GOOGLE_API_KEY=AIza-xxxxxxxxxxxxxxxxxxxx
+GOOGLE_ADK_MODEL=gemini-flash-latest
+```
+
+If ADK returns `429 RESOURCE_EXHAUSTED`, your Google API project has no quota for the selected Gemini model. Fix one of these:
+
+- Enable billing or request quota for the project used by `GOOGLE_API_KEY`.
+- Wait for quota reset if the error includes a retry delay.
+- Change `GOOGLE_ADK_MODEL` to a model your project has quota for.
+- Keep using the normal FastAPI/Next app, which can run with Groq/Anthropic/OpenAI or deterministic fallback instead of Gemini.
+
+ADK tools provided:
+
+| Tool | Purpose |
+|------|---------|
+| `run_complete_trip_analysis` | Runs the full scraper + card optimizer + report pipeline |
+| `search_flights` | Searches flight sources only |
+| `search_hotels` | Searches hotel sources only, including Priceline when configured |
+| `analyze_card_savings` | Runs deterministic card KB + effective-cost math |
+
+The ADK agent does not replace the current app. It reuses the same backend logic so prices, source status, card savings, and verified tables stay deterministic.
+
+Priceline note: Priceline blocks public headless scraping with captcha in many environments. Actual Priceline hotel prices require a RapidAPI subscription for `PRICELINE_RAPIDAPI_HOST` in `.env`. If that subscription is missing, reports include a direct Priceline search link for manual verification.
+
+---
+
 ## API Reference
 
 | Method | Endpoint | Description |

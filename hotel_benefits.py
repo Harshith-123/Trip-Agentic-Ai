@@ -41,17 +41,15 @@ _PERKS_DB: list[dict] = [
         "bank_keywords": ["amex", "american express"],
         "chain": "ALL",
         "extra_saving_pct": 0,
-        "flat_credit": 100,
+        "flat_credit": 0,
         "status_level": "",
         "perks_list": [
-            "Fine Hotels & Resorts (FHR): $100 property credit per stay",
-            "Room upgrade when available at check-in",
-            "Complimentary breakfast for two daily",
-            "Guaranteed 4 PM late checkout",
-            "3 PM early check-in when available",
-            "12x Membership Rewards on Amex Travel bookings",
+            "Fine Hotels & Resorts / Hotel Collection perks may apply only at eligible Amex Travel properties",
+            "Do not assume the $100 property credit unless the specific hotel is FHR/THC eligible",
+            "Potential room upgrade, breakfast, late checkout, or property credit depends on eligibility",
+            "Verify the exact hotel on Amex Travel before valuing these perks",
         ],
-        "booking_tip": "Book via Amex Travel (amextravel.com) to activate FHR benefits.",
+        "booking_tip": "Check Amex Travel eligibility first; FHR/THC credits are not included in savings unless the property is confirmed eligible.",
     },
     {
         "card_keywords": ["platinum"],
@@ -292,9 +290,14 @@ def get_hotel_perks(
     for entry in _PERKS_DB:
         card_ok = any(kw in norm_card for kw in entry["card_keywords"])
         bank_ok  = any(kw in norm_bank  for kw in entry["bank_keywords"])
-        chain_ok = (entry["chain"] == "ALL" or
-                    _normalise(entry["chain"]) in norm_chain or
-                    norm_chain in _normalise(entry["chain"]))
+        chain_ok = (
+            entry["chain"] == "ALL"
+            or bool(norm_chain)
+            and (
+                _normalise(entry["chain"]) in norm_chain
+                or norm_chain in _normalise(entry["chain"])
+            )
+        )
         if card_ok and bank_ok and chain_ok:
             matches.append(HotelPerk(
                 card_name=card_name,

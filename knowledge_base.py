@@ -217,6 +217,19 @@ _CARD_DB: dict[tuple[str, str], dict[str, dict]] = {
     },
 
     # ── American Express ───────────────────────────────────────────────────
+    ("amex platinum", "amex"): {
+        "flight":     dict(cashback_pct=0, reward_pct=5.0, forex_pct=0.0, discount_pct=0,
+                           description="Amex Platinum commonly earns strong value on flights booked directly or via Amex Travel; 0% forex assumed in this KB estimate."),
+        "hotel":      dict(cashback_pct=0, reward_pct=1.0, forex_pct=0.0, discount_pct=0,
+                           description="Base hotel earning only. FHR/Hotel Collection credits are property-specific and are not assumed unless eligibility is verified."),
+        "car":        dict(cashback_pct=0, reward_pct=1.0, forex_pct=0.0, discount_pct=0,
+                           description="Base MR earning; 0% forex assumed."),
+        "attraction": dict(cashback_pct=0, reward_pct=1.0, forex_pct=0.0, discount_pct=0,
+                           description="Base MR earning; 0% forex assumed."),
+        "lounge": "Priority Pass + Amex Centurion Lounges",
+        "travel_insurance": True,
+    },
+
     ("amex platinum travel", "amex"): {
         "flight":     dict(cashback_pct=0, reward_pct=5.0, forex_pct=0.0, discount_pct=0,
                            description="5x MR points on Amex Travel bookings ≈ 5% value; 0% forex → full 5% net."),
@@ -362,6 +375,29 @@ def _normalise(s: str) -> str:
     return re.sub(r"[^a-z0-9 ]", "", s.lower()).strip()
 
 
+_GENERIC_CARD_WORDS = {
+    "card", "credit", "debit", "visa", "mastercard", "rupay", "diners",
+    "amex", "american", "express", "hdfc", "sbi", "axis", "icici",
+    "chase", "citi", "yes", "kotak", "bank",
+}
+
+
+def _meaningful_card_words(name: str) -> set[str]:
+    return {word for word in _normalise(name).split() if word not in _GENERIC_CARD_WORDS}
+
+
+def _bank_matches(db_bank: str, input_bank: str) -> bool:
+    aliases = {
+        "amex": {"amex", "american express"},
+        "american express": {"amex", "american express"},
+    }
+    db = _normalise(db_bank)
+    raw = _normalise(input_bank)
+    input_aliases = aliases.get(raw, {raw})
+    db_aliases = aliases.get(db, {db})
+    return bool(input_aliases & db_aliases) or db in raw or raw in db
+
+
 def _build_benefit(data: dict, category: str, matched_name: str = "") -> CardBenefit:
     cat = data.get(category, data.get("flight", {}))
     lounge = data.get("lounge", "Unknown")
@@ -393,24 +429,33 @@ def get_card_benefit(card_name: str, bank: str, network: str, category: str) -> 
     norm_bank = _normalise(bank)
     norm_net  = _normalise(network)
 
-    # 1. Exact match
-    for (db_name, db_bank), data in _CARD_DB.items():
-        if db_name in norm_name or norm_name in db_name:
-            if db_bank in norm_bank or norm_bank in db_bank:
+    meaningful_words = _meaningful_card_words(norm_name)
+
+    # 1. Exact/specific match. Avoid mapping generic names like "AMEX" to a premium card.
+    for (db_name, db_bank), data in sorted(_CARD_DB.items(), key=lambda item: len(item[0][0]), reverse=True):
+        specific_name_match = (
+            db_name == norm_name
+            or db_name in norm_name
+        )
+        if specific_name_match:
+            if _bank_matches(db_bank, norm_bank):
                 return _build_benefit(data, category, db_name.title())
 
-    # 2. Partial name match (any word overlap)
-    name_words = set(norm_name.split())
+    # 2. Partial product-name match. Bank/network-only words are ignored.
+    name_words = meaningful_words
     best_score = 0
+    best_specificity = 0
     best_data = None
     best_db_name = ""
     for (db_name, db_bank), data in _CARD_DB.items():
-        if db_bank not in norm_bank and norm_bank not in db_bank:
+        if not _bank_matches(db_bank, norm_bank):
             continue
-        db_words = set(db_name.split())
+        db_words = _meaningful_card_words(db_name)
         score = len(name_words & db_words)
-        if score > best_score:
+        specificity = len(db_words)
+        if score > best_score or (score == best_score and specificity > best_specificity):
             best_score = score
+            best_specificity = specificity
             best_data = data
             best_db_name = db_name
 
