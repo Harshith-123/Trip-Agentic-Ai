@@ -83,6 +83,11 @@ def _cleanup_stale_sessions() -> None:
                  if now - s.get("_created_at", 0) > _SESSION_TTL]
         for sid in stale:
             _sessions.pop(sid, None)
+    with _scraper_lock:
+        stale = [sid for sid, s in _scraper_sessions.items()
+                 if now - s.get("_created_at", 0) > _SESSION_TTL]
+        for sid in stale:
+            _scraper_sessions.pop(sid, None)
 
 
 # ─── Pydantic models ───────────────────────────────────────────────────────────
@@ -171,9 +176,6 @@ def _run_pipeline_bg(session_id: str, trip_payload: TripPayload) -> None:
         print(f"[API] Pipeline error for {session_id}:\n{tb}")
     finally:
         unregister_session(session_id)
-        # Clean up session data so stale reconnections return "not found"
-        with _sessions_lock:
-            _sessions.pop(session_id, None)
 
 
 # ─── Routes ────────────────────────────────────────────────────────────────────
@@ -403,10 +405,6 @@ def _run_scraper_bg(session_id: str, payload: ScrapePayload) -> None:
             if session_id in _scraper_sessions:
                 _scraper_sessions[session_id]["status"] = "error"
         q.put({"type": "error", "data": str(exc)})
-    finally:
-        # Clean up scraper session so stale reconnections return "not found"
-        with _scraper_lock:
-            _scraper_sessions.pop(session_id, None)
 
 
 @app.post("/api/scrape/run")
