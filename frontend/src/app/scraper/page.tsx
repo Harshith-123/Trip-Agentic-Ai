@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Plane, Search, ChevronRight } from 'lucide-react';
 import ScraperForm from '@/components/ScraperForm';
 import ScraperResults from '@/components/ScraperResults';
+import { wsUrl } from '@/lib/api';
 
 type Step = 'form' | 'running' | 'done';
 interface ScrapeResult { flights: unknown[]; hotels: unknown[]; }
@@ -36,7 +37,7 @@ function ScraperProgress({ sessionId, onComplete }: Readonly<{ sessionId: string
     if (!sessionId) return;
     if (wsRef.current) return;
 
-    const ws = new WebSocket(`ws://localhost:8000/ws/scrape/${sessionId}`);
+    const ws = new WebSocket(wsUrl(`/ws/scrape/${sessionId}`));
     wsRef.current = ws;
     ws.onopen  = () => setWsStatus('open');
     ws.onclose = () => setWsStatus('closed');

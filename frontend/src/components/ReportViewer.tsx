@@ -14,6 +14,12 @@ interface HotelRec {
   savings: number;
   effective_price: number;
   benefit: { reward_pct: number; cashback_pct: number; discount_pct: number; forex_pct: number; effective_pct: number };
+  components?: {
+    flight?: { savings?: number; effective_price?: number; benefit_pct?: number; description?: string };
+    hotel?: { savings?: number; effective_price?: number; benefit_pct?: number; description?: string; chain?: string; nights?: number };
+    hotel_perk?: { savings?: number; status_level?: string; perks?: string[]; booking_tip?: string };
+    travel_protection?: { lounge?: string; travel_insurance?: boolean };
+  };
 }
 
 type Rec = HotelRec;
@@ -164,7 +170,7 @@ function FlightsTab({ flights }: { flights: FlightRow[] }) {
 export default function ReportViewer({ result, onReset }: Props) {
   const [tab, setTab] = useState<Tab>('report');
   const recs          = result.recommendations as Rec[];
-  const totalSavings  = recs.reduce((s, r) => s + (r.savings ?? 0), 0);
+  const bestSavings   = recs[0]?.savings ?? 0;
   const topCurrency   = recs[0]?.currency ?? 'USD';
 
   function downloadReport() {
@@ -184,12 +190,12 @@ export default function ReportViewer({ result, onReset }: Props) {
   return (
     <div className="max-w-5xl mx-auto space-y-4 animate-fade-in">
       {/* Savings hero */}
-      {totalSavings > 0 && (
+      {bestSavings > 0 && (
         <div className="bg-gradient-to-r from-green-500 via-emerald-600 to-brand rounded-[2rem] p-6 flex items-center justify-between shadow-xl shadow-emerald-900/15">
           <div>
-            <p className="text-green-100 text-xs font-bold uppercase tracking-widest mb-1">Potential Savings Found</p>
-            <p className="text-4xl font-extrabold text-white">{topCurrency} {totalSavings.toFixed(0)}</p>
-            <p className="text-green-100 text-sm mt-1">across {recs.length} card recommendation{recs.length !== 1 ? 's' : ''}</p>
+            <p className="text-green-100 text-xs font-bold uppercase tracking-widest mb-1">Best Potential Savings</p>
+            <p className="text-4xl font-extrabold text-white">{topCurrency} {bestSavings.toFixed(0)}</p>
+            <p className="text-green-100 text-sm mt-1">with {recs[0]?.card.name ?? 'the top card'} from {recs.length} ranked option{recs.length !== 1 ? 's' : ''}</p>
           </div>
           <div className="w-16 h-16 bg-white/20 rounded-2xl flex items-center justify-center">
             <TrendingDown size={32} className="text-white" />
@@ -237,7 +243,12 @@ export default function ReportViewer({ result, onReset }: Props) {
             <div className="card-white p-10 text-center">
               <p className="text-sm text-gray-400">No card recommendations generated.</p>
             </div>
-          ) : recs.map((rec, i) => (
+          ) : recs.map((rec, i) => {
+            const flight = rec.components?.flight;
+            const hotel = rec.components?.hotel;
+            const perk = rec.components?.hotel_perk;
+            const protection = rec.components?.travel_protection;
+            return (
             <div key={i} className="card-white workflow-card p-5 hover:shadow-card-hover transition-shadow">
               <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 mb-4">
                 <div>
@@ -256,6 +267,18 @@ export default function ReportViewer({ result, onReset }: Props) {
                 <BenefitPill label="Discount" value={`${rec.benefit.discount_pct}%`} positive />
                 <BenefitPill label="Forex"    value={`-${rec.benefit.forex_pct}%`}   positive={false} />
               </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-3">
+                <DetailBox label="Flight Saving" value={`${rec.currency} ${(flight?.savings ?? 0).toFixed(0)}`} sub={flight?.description} />
+                <DetailBox label="Hotel Saving" value={`${rec.currency} ${(hotel?.savings ?? 0).toFixed(0)}`} sub={hotel?.chain ? `${hotel.chain} · ${hotel.nights ?? 1} night(s)` : hotel?.description} />
+                <DetailBox label="Hotel Perks" value={`${rec.currency} ${(perk?.savings ?? 0).toFixed(0)}`} sub={perk?.status_level || perk?.booking_tip} />
+              </div>
+              {(protection?.lounge || protection?.travel_insurance || perk?.booking_tip) && (
+                <div className="mb-3 rounded-2xl bg-slate-50 border border-slate-100 px-4 py-3 text-xs text-slate-500 leading-relaxed">
+                  {protection?.lounge && <p><span className="font-bold text-slate-700">Lounge:</span> {protection.lounge}</p>}
+                  <p><span className="font-bold text-slate-700">Travel insurance:</span> {protection?.travel_insurance ? 'Included/likely available' : 'Not clearly included'}</p>
+                  {perk?.booking_tip && <p><span className="font-bold text-slate-700">Booking tip:</span> {perk.booking_tip}</p>}
+                </div>
+              )}
               <div className="flex items-center justify-between">
                 <p className="text-xs font-bold text-brand">
                   Net: {rec.benefit.effective_pct > 0 ? '+' : ''}{rec.benefit.effective_pct.toFixed(1)}% effective savings
@@ -268,7 +291,7 @@ export default function ReportViewer({ result, onReset }: Props) {
                 </div>
               </div>
             </div>
-          ))}
+          );})}
         </div>
       )}
 
@@ -292,3 +315,12 @@ function BenefitPill({ label, value, positive }: { label: string; value: string;
   );
 }
 
+function DetailBox({ label, value, sub }: { label: string; value: string; sub?: string }) {
+  return (
+    <div className="rounded-xl border border-slate-100 bg-white/70 px-3 py-2">
+      <p className="text-[11px] font-bold uppercase tracking-widest text-slate-400">{label}</p>
+      <p className="text-sm font-extrabold text-slate-800">{value}</p>
+      {sub && <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-slate-400">{sub}</p>}
+    </div>
+  );
+}

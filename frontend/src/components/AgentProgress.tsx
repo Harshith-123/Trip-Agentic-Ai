@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { wsUrl } from '@/lib/api';
 
 interface ProgressMsg {
   type: 'progress' | 'complete' | 'error';
@@ -80,7 +81,7 @@ export default function AgentProgress({ sessionId, onComplete }: Props) {
     const timer = setTimeout(() => {
       if (cancelled) return;
 
-      ws = new WebSocket(`ws://localhost:8000/ws/${sessionId}`);
+      ws = new WebSocket(wsUrl(`/ws/${sessionId}`));
       wsRef.current = ws;
 
       ws.onopen = () => { if (!cancelled) setWsStatus('open'); };

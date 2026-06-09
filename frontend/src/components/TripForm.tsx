@@ -2,6 +2,8 @@
 
 import { useState, useEffect } from 'react';
 import { CreditCard, MapPin, Calendar, Users, DollarSign, Trash2, Plus } from 'lucide-react';
+import { apiUrl } from '@/lib/api';
+import { AIRPORT_OPTIONS, BANK_OPTIONS, CARD_OPTIONS, airportCode, findCardOption } from '@/lib/options';
 
 interface Card {
   name: string; bank: string; network: string; card_type: string; number_last4: string;
@@ -60,8 +62,18 @@ export default function TripForm({ onStart }: Props) {
     setError('');
   }
 
+  function updateCardName(value: string) {
+    const selected = findCardOption(value);
+    setCardForm(p => ({
+      ...p,
+      name: value,
+      bank: selected?.bank ?? p.bank,
+      network: selected?.network ?? p.network,
+    }));
+  }
+
   async function submit() {
-    const org = origin.trim().toUpperCase(), dst = dest.trim().toUpperCase();
+    const org = airportCode(origin), dst = airportCode(dest);
     if (!org || !dst || !checkIn)                          { setError('Fill in origin, destination and departure date.'); return; }
     if (org === dst)                                       { setError('Origin and destination cannot be the same.'); return; }
     if (org.length !== 3 || dst.length !== 3)             { setError('Airport codes must be 3 letters (e.g. BLR, JFK).'); return; }
@@ -71,7 +83,7 @@ export default function TripForm({ onStart }: Props) {
     if (!cards.length)                                    { setError('Add at least one card.'); return; }
     setError(''); setLoading(true);
     try {
-      const res = await fetch('/api/run', {
+      const res = await fetch(apiUrl('/api/run'), {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           cards, origin: org, destination: dst,
@@ -92,6 +104,19 @@ export default function TripForm({ onStart }: Props) {
 
   return (
     <div className="max-w-3xl mx-auto space-y-4 animate-slide-up">
+      <datalist id="card-options">
+        {CARD_OPTIONS.map(card => (
+          <option key={card.name} value={card.name}>{card.bank} · {card.network.toUpperCase()}</option>
+        ))}
+      </datalist>
+      <datalist id="bank-options">
+        {BANK_OPTIONS.map(bank => <option key={bank} value={bank} />)}
+      </datalist>
+      <datalist id="airport-options">
+        {AIRPORT_OPTIONS.map(airport => (
+          <option key={airport.code} value={airport.code}>{airport.label}</option>
+        ))}
+      </datalist>
       {/* Step tabs */}
       <div className="card-white p-1.5 flex gap-1">
         {([1, 2] as const).map((s) => (
@@ -148,12 +173,12 @@ export default function TripForm({ onStart }: Props) {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="col-span-2">
                 <label className="label-sm">Card Name</label>
-                <input className="input-field" placeholder="e.g. HDFC Regalia, Chase Sapphire" value={cardForm.name}
-                  onChange={e => setCardForm(p => ({ ...p, name: e.target.value }))} />
+                <input className="input-field" list="card-options" placeholder="Start typing: HDFC Infinia, Amex Platinum..." value={cardForm.name}
+                  onChange={e => updateCardName(e.target.value)} />
               </div>
               <div>
                 <label className="label-sm">Bank</label>
-                <input className="input-field" placeholder="e.g. HDFC, Chase" value={cardForm.bank}
+                <input className="input-field" list="bank-options" placeholder="e.g. HDFC, Chase" value={cardForm.bank}
                   onChange={e => setCardForm(p => ({ ...p, bank: e.target.value }))} />
               </div>
               <div>
@@ -217,13 +242,13 @@ export default function TripForm({ onStart }: Props) {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="label-sm">Origin (IATA)</label>
-                <input className="input-field uppercase font-mono tracking-widest text-base font-bold" placeholder="BLR"
-                  value={origin} onChange={e => setOrigin(e.target.value.toUpperCase())} maxLength={3} />
+                <input className="input-field uppercase font-mono tracking-widest text-base font-bold" list="airport-options" placeholder="BLR"
+                  value={origin} onChange={e => setOrigin(airportCode(e.target.value))} maxLength={3} />
               </div>
               <div>
                 <label className="label-sm">Destination (IATA)</label>
-                <input className="input-field uppercase font-mono tracking-widest text-base font-bold" placeholder="JFK"
-                  value={dest} onChange={e => setDest(e.target.value.toUpperCase())} maxLength={3} />
+                <input className="input-field uppercase font-mono tracking-widest text-base font-bold" list="airport-options" placeholder="JFK"
+                  value={dest} onChange={e => setDest(airportCode(e.target.value))} maxLength={3} />
               </div>
               <div>
                 <label className="label-sm"><Calendar size={10} className="inline mr-1" />Departure</label>

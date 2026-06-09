@@ -2,6 +2,8 @@
 
 import { useState } from 'react';
 import { MapPin, Calendar, Users, DollarSign } from 'lucide-react';
+import { apiUrl } from '@/lib/api';
+import { AIRPORT_OPTIONS, airportCode } from '@/lib/options';
 
 interface Props { onStart: (sessionId: string) => void; }
 
@@ -25,7 +27,7 @@ export default function ScraperForm({ onStart }: Readonly<Props>) {
   const [loading,     setLoading]     = useState(false);
 
   async function submit() {
-    const org = origin.trim().toUpperCase(), dst = destination.trim().toUpperCase();
+    const org = airportCode(origin), dst = airportCode(destination);
     if (!org || !dst || !date)                    { setError('Fill in origin, destination and departure date.'); return; }
     if (org === dst)                              { setError('Origin and destination cannot be the same.'); return; }
     if (org.length !== 3 || dst.length !== 3)    { setError('Airport codes must be 3 letters (e.g. DEL, JFK).'); return; }
@@ -35,7 +37,7 @@ export default function ScraperForm({ onStart }: Readonly<Props>) {
     if (tripType === 'round-trip' && !returnDate) { setError('Select a return date.'); return; }
     setError(''); setLoading(true);
     try {
-      const res = await fetch('/api/scrape/run', {
+      const res = await fetch(apiUrl('/api/scrape/run'), {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           origin: org, destination: dst, date, city: city.trim(),
@@ -54,6 +56,12 @@ export default function ScraperForm({ onStart }: Readonly<Props>) {
 
   return (
     <div className="max-w-3xl mx-auto space-y-4 animate-slide-up">
+      <datalist id="scraper-airport-options">
+        {AIRPORT_OPTIONS.map(airport => (
+          <option key={airport.code} value={airport.code}>{airport.label}</option>
+        ))}
+      </datalist>
+
       {/* Trip type */}
       <div className="card-white p-1.5 flex gap-1">
         {(['one-way', 'round-trip'] as const).map((t) => (
@@ -74,13 +82,13 @@ export default function ScraperForm({ onStart }: Readonly<Props>) {
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label className="label-sm">Origin (IATA)</label>
-            <input className="input-field uppercase font-mono tracking-widest text-base font-bold" placeholder="DEL"
-              value={origin} maxLength={3} onChange={(e) => setOrigin(e.target.value.toUpperCase())} />
+            <input className="input-field uppercase font-mono tracking-widest text-base font-bold" list="scraper-airport-options" placeholder="DEL"
+              value={origin} maxLength={3} onChange={(e) => setOrigin(airportCode(e.target.value))} />
           </div>
           <div>
             <label className="label-sm">Destination (IATA)</label>
-            <input className="input-field uppercase font-mono tracking-widest text-base font-bold" placeholder="DXB"
-              value={destination} maxLength={3} onChange={(e) => setDestination(e.target.value.toUpperCase())} />
+            <input className="input-field uppercase font-mono tracking-widest text-base font-bold" list="scraper-airport-options" placeholder="DXB"
+              value={destination} maxLength={3} onChange={(e) => setDestination(airportCode(e.target.value))} />
           </div>
           <div>
             <label className="label-sm"><Calendar size={10} className="inline mr-1" />Departure</label>
